@@ -6,7 +6,6 @@ from langfuse.callback import CallbackHandler
 from src.config import settings
 from src.retriever import build_retriever
 
-
 SYSTEM_PROMPT = """You are a DORA (Digital Operational Resilience Act) compliance expert
 for EU financial institutions operating under BaFin supervision.
 

@@ -1,4 +1,5 @@
 import json
+from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers import EnsembleRetriever, ContextualCompressionRetriever
 from langchain_cohere import CohereRerank
@@ -6,7 +7,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_postgres import PGVector
 from langchain.schema import Document
 from src.config import settings
-
+from langchain.retrievers.document_compressors import CrossEncoderReranker
 
 
 def load_chunks_from_cache(path: str = "data/chunks_cache.json") -> list[Document]:
@@ -46,11 +47,21 @@ def build_retriever() -> ContextualCompressionRetriever:
         retrievers=[bm25_retriever, pgvector_retriever],
         weights=[0.4, 0.6]
     )
-    
-    reranker = CohereRerank(
+    ### removing usage of CohereRerank for now, as it have limit of api call    
+    '''reranker = CohereRerank(
         model="rerank-english-v3.0",  
         top_n=settings.rerank_top_n,
         cohere_api_key=settings.cohere_api_key
+    )'''
+    
+    rerank_model = HuggingFaceCrossEncoder(
+        model_name="BAAI/bge-reranker-base",
+        device="cpu"
+    )
+    
+    reranker = CrossEncoderReranker(
+        cross_encoder=rerank_model,
+        top_n=settings.rerank_top_n
     )
     
     # Wrap the hybrid retriever with a ContextualCompressionRetriever for reranking
