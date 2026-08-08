@@ -22,7 +22,7 @@ Rules:
 def format_docs(docs: list) -> str:
     """Format retrieved documents for inclusion in the prompt."""
     formatted = []
-    print("Running format_docs function")
+    
     for i,doc in enumerate(docs,1):
         
         try:
@@ -32,7 +32,7 @@ def format_docs(docs: list) -> str:
             section = metadata.get("section","Unknown")    
             content = doc.page_content
             formatted.append(f"Source: {source}\nRegulation: {regulation}\nSection: {section}\nContent:\n{content}\n")
-            print(formatted)
+            
         except AttributeError:
             print(f"=== Doc {i} FAILED: {type(e).__name__}: {e} ===")
             formatted.append(f"[Chunk {i} unavailable]\n")
@@ -75,8 +75,3 @@ def build_chain():
 def get_langfuse_handler():
     """Return a Langfuse callback handler for monitoring."""
     return CallbackHandler(public_key=settings.langfuse_public_key, secret_key=settings.langfuse_secret_key, host=settings.langfuse_base_url)
-
-'''
-chain, retriever = build_chain()
-print("Value recieved in chain:", chain)
-print("Value recieved in retriever:", retriever)'''

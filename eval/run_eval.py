@@ -1,8 +1,9 @@
 import json
+import time
 from ragas import evaluate
 from ragas.metrics import faithfulness, answer_relevancy, context_precision, context_recall
 from ragas.llms import LangchainLLMWrapper
-from ragas.embeddings import LangchainembeddingsWrapper
+from ragas.embeddings import LangchainEmbeddingsWrapper
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings 
 from datasets import Dataset
@@ -10,11 +11,12 @@ from src.chain import build_chain
 from src.retriever import build_retriever
 from pathlib import Path
 from tenacity import retry, stop_after_attempt, wait_exponential
+from src.config import settings
 
 
 ## Initial declarations
 
-rate_limit_delay = 5
+rate_limit_delay = 20
 checkpoint_path = Path("data/eval/eval_checkpoint.json")
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=60), reraise=True)
@@ -51,14 +53,22 @@ def collect_predictions(chain, retriever, golden_dataset):
                 "ground_truth": entry.get("ground_truth")
             })
             
-            # Save checkpoint after each successful prediction
-            with open(checkpoint_path, "w") as f:
-                json.dump(records, f, indent=4)
+            
             
             print(f"Processed {i+1}/{len(golden_dataset)}: {question}")
         
         except Exception as e:
             print(f"Error processing question '{question}': {e}")
+            break
+        
+        # Save checkpoint after each successful prediction
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(checkpoint_path, "w") as f:
+            json.dump(records, f, indent=4)
+        
+        time.sleep(rate_limit_delay)  # Delay to respect rate limits
+    
+    return records
 def run_eval():
     """Run evaluation on the golden dataset."""
     chain, retriever = build_chain()
@@ -66,41 +76,56 @@ def run_eval():
     with open("data/eval/golden_dataset.json", "r") as f:
         golden_dataset = json.load(f)
 
-    questions,answers,contexts,ground_truths = [],[],[],[]
-    print("Preparing evaluation dataset...")
-    for entry in golden_dataset:
-        q = entry.get("question")
-        gt = entry.get("ground_truth")
-        
-        ans = chain.invoke(q)
-        docs = retriever.invoke(q)
-        ctxt = [doc.page_content for doc in docs]
-        questions.append(q)
-        answers.append(ans)
-        contexts.append(ctxt)
-        ground_truths.append(gt)
-        
-        print(f"Question: {q}\nAnswer: {ans}\nContext: {ctxt}\nGround Truth: {gt}\n---\n")
+    predictions = collect_predictions(chain, retriever, golden_dataset)
+    
+    if(len(predictions)<len(golden_dataset)):
+        print(f"Warning: Only {len(predictions)} out of {len(golden_dataset)} questions were processed. Check the checkpoint file for details.")
+    
+    
         
     dataset = Dataset.from_dict({
-        "question": questions,
-        "answer": answers,
-        "context": contexts,
-        "ground_truth": ground_truths
+        "question": [p["question"] for p in predictions],
+        "answer": [p["answer"] for p in predictions],
+        "retrieved_contexts": [p["context"] for p in predictions],
+        "ground_truth": [p["ground_truth"] for p in predictions]
     })
+    
+    judge_llm = LangchainLLMWrapper(ChatGoogleGenerativeAI(
+        model=settings.llm_model,
+        api_key=settings.google_api_key
+    ))
+    
+    judge_embeddings = LangchainEmbeddingsWrapper(HuggingFaceEmbeddings(
+        model_name="BAAI/bge-small-en-v1.5",
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True}
+    ))
+    
+    print("Starting evaluation with RAGAS...")
     result = evaluate(
         dataset,
-        metrics=[faithfulness, answer_relevancy, context_precision, context_recall])
+        llm=judge_llm,
+        embeddings=judge_embeddings,
+        metrics=[faithfulness, answer_relevancy, context_precision, context_recall],
+        raise_exceptions=False)
     
-    scores = result.to_pandas().mean().to_dict()
+    
+    
+    df = result.to_pandas()
+    #df["retrieved_contexts"] = df["context"]
+    scores = df[[metric.name for metric in [faithfulness, answer_relevancy, context_precision, context_recall]]].mean().to_dict()
+    for metric, score in scores.items():
+        print(f"  {metric:20} {score:.4f}")
+        
+    
     print("Evaluation completed. Average scores:")
     
-    for metric, score in scores.items():
-        print(f"{metric}: {score:.4f}")
     
     with open("data/eval/evaluation_results.json", "w") as f:
         json.dump(scores, f, indent=4)
     
+    df.to_csv("data/eval/per_question_results.csv", index=False)
+    print("\nSaved: evaluation_results.json + per_question_results.csv")
     return scores
 
 if __name__ == "__main__":
