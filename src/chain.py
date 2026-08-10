@@ -5,6 +5,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langfuse.callback import CallbackHandler
 from src.config import settings
 from src.retriever import build_retriever
+from google.ai.generativelanguage_v1beta.types import GenerationConfig
 
 SYSTEM_PROMPT = """You are a DORA (Digital Operational Resilience Act) compliance expert
 for EU financial institutions operating under BaFin supervision.
@@ -57,7 +58,7 @@ def build_chain():
     # Create the LLM with Langfuse callback for monitoring
     llm = ChatGoogleGenerativeAI(
         model=settings.llm_model,
-        temperature=0.0,
+        generation_config=GenerationConfig(temperature=0.0),
         api_key=settings.google_api_key,
         callbacks=[get_langfuse_handler()]
     )

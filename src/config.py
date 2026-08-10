@@ -12,7 +12,8 @@ class Settings(BaseSettings):
     google_api_key: str
     langfuse_public_key: str
     langfuse_secret_key: str
-    langfuse_base_url: str 
+    langfuse_base_url: str
+    groq_api_key: str
 
     class Config:
         env_file = ".env"
