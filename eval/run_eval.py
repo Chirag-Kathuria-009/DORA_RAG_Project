@@ -25,6 +25,26 @@ checkpoint_path = Path("data/eval/eval_checkpoint.json")
 judge_model = "llama-3.3-70b-versatile"
 metrics = [Faithfulness(), AnswerRelevancy(), ContextPrecision(), ContextRecall()]
 OUT_DIR = Path("data/eval")
+metric_cache = Path("data/eval/metric_cache.json")
+
+JUDGE_BY_METRIC = {
+    "faithfulness":      "llama-3.3-70b-versatile",   
+    "context_precision": "openai/gpt-oss-120b",       
+    "context_recall":    "openai/gpt-oss-20b",          
+    "answer_relevancy":  "qwen/qwen3.6-27b",        
+}
+
+def load_metric_cache():
+    if metric_cache.exists():
+        with open(metric_cache, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_metric_cache(cache):
+    metric_cache.parent.mkdir(parents=True, exist_ok=True)
+    with open(metric_cache, "w", encoding="utf-8") as f:
+        json.dump(cache, f, indent=2, ensure_ascii=False)
+
 #metrics_name = ["faithfullness", "answer_relevancy", "context_precision", "context_recall"]
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=60), reraise=True)
@@ -32,6 +52,13 @@ OUT_DIR = Path("data/eval")
 def safe_invoke(runnable,query):
     """Invoke the chain with retry logic for rate limiting."""
     return runnable.invoke(query)
+
+def sample_records(records,n=None):
+    if n is None or n >= len(records):
+        return records
+    step = len(records) // n
+    return [records[i] for i in range(0, len(records), step)][:n]
+
 
 def collect_predictions(chain, retriever, golden_dataset):
     #run rag pipeline over golden dataset with checkpointing to allow resuming after interruptions
@@ -126,14 +153,27 @@ def evaluate_metric(dataset, metric, judge_llm, judge_embeddings):
     except Exception as e:
         print(f"Error evaluating metric {name}: {e}")
         return name, None, None
+
+def build_judge(model_name: str):
+    return LangchainLLMWrapper(
+        ChatGroq(
+            model=model_name,
+            temperature=0,
+            api_key=settings.groq_api_key,
+            max_retries=3,
+            timeout=90,
+        )
+    )
+
 def run_eval():
     """Run evaluation on the golden dataset."""
     chain, retriever = build_chain()
     
     with open("data/eval/golden_dataset.json", "r") as f:
         golden_dataset = json.load(f)
-
+    
     predictions = collect_predictions(chain, retriever, golden_dataset)
+    predictions = sample_records(predictions, n=25)  # Limit to 25 questions for evaluation
     
     if(len(predictions)<len(golden_dataset)):
         print(f"Warning: Only {len(predictions)} out of {len(golden_dataset)} questions were processed. Check the checkpoint file for details.")
@@ -152,6 +192,8 @@ def run_eval():
         "ground_truth":       [r["ground_truth"] for r in predictions],
     })
     
+   
+    '''
     judge_llm = LangchainLLMWrapper(
         ChatGroq(
             model=judge_model,
@@ -160,7 +202,7 @@ def run_eval():
             max_retries = 3,
             timeout = 90
         )
-    )
+    )'''
     
     judge_embeddings = LangchainEmbeddingsWrapper(HuggingFaceEmbeddings(
         model_name="BAAI/bge-small-en-v1.5",
@@ -171,9 +213,30 @@ def run_eval():
     scores = {}
     per_question = pd.DataFrame({"question": [r["question"] for r in predictions]})
     
+    metric_cache = load_metric_cache()
+    
     for metric in metrics:
-        name,score,col_df = evaluate_metric(dataset, metric, judge_llm, judge_embeddings)
-        scores[name] = score
+        name = getattr(metric, "name", metric.__class__.__name__)
+        if name in metric_cache and metric_cache[name] is not None:
+            print(f"Using cached score for metric: {name}")
+            scores[name] = metric_cache[name]
+            continue
+        
+        try:
+            model_name = JUDGE_BY_METRIC.get(name, "openai/gpt-oss-20b")
+            print(f"\n--- {name} (judge: {model_name}) ---")
+            judge_llm = build_judge(model_name)
+            
+            name,score,col_df = evaluate_metric(dataset, metric, judge_llm, judge_embeddings)
+            scores[name] = score
+            metric_cache[name] = score
+            save_metric_cache(metric_cache)
+        except Exception as e:
+            print(f"Error evaluating metric {name}: {e}")
+            save_metric_cache(metric_cache)
+            print(f"Partial results for metric {name} stored.")
+            break
+        
         if col_df is not None:
             per_question = pd.concat([per_question, col_df.reset_index(drop=True)], axis=1)
         time.sleep(10)  # Delay between metrics to avoid rate limits
