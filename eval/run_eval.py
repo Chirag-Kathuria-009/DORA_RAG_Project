@@ -16,6 +16,18 @@ from src.config import settings
 from langchain_groq import ChatGroq
 import pandas as pd
 
+'''
+Important points:
+Question
+   ↓
+[RETRIEVAL] ────────── context_recall     "did we fetch what was needed?"
+   ↓
+[RANKING] ──────────── context_precision  "is what we fetched mostly useful?"
+   ↓
+[GENERATION] ───────── faithfulness       "did the model stay inside the context?"
+   ↓
+[RESPONSIVENESS] ───── answer_relevancy   "did it answer the question asked?"
+'''
 
 
 ## Initial declarations
