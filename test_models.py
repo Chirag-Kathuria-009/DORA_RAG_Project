@@ -2,9 +2,11 @@ import os
 import requests
 from dotenv import load_dotenv
 
+from src.chain import build_chain
+
 # 1. Set your API Key (replace with your key or set via environment variable)
 # os.environ["GROQ_API_KEY"] = "your_actual_api_key_here"
-load_dotenv()
+'''load_dotenv()
 api_key =  os.getenv("GROQ_API_KEY")
 
 
@@ -31,4 +33,8 @@ model_ids = [model["id"] for model in data["data"]]
 
 # 5. Print results
 for model_id in model_ids:
-    print(model_id)
+    print(model_id)'''
+    
+chain, retriever = build_chain()
+docs = retriever.invoke("What is the ICT risk management framework?")
+print(f"Chunks returned: {len(docs)}")

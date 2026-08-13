@@ -277,6 +277,8 @@ def run_eval():
 
 
 if __name__ == "__main__":
+    #testing retrieved chunks for particular question
+    
     run_eval()
     
 
