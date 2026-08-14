@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     database_url: str 
     embedding_model: int = 384
     llm_model: str = "models/gemini-3.5-flash-lite"
-    retrieval_top_k: int = 20
+    retrieval_top_k: int = 35
     rerank_top_n: int = 5
     chunk_size: int = 512
     chunk_overlap: int = 50

@@ -282,3 +282,15 @@ if __name__ == "__main__":
     run_eval()
     
 
+'''
+Important conclusions to remember from results:
+
+The diagnostic power comes from reading them as pairs, not individually:
+
+Pattern	Failing stage	What's actually wrong
+Low recall + low precision	Retrieval	Embeddings, chunking, or query mismatch
+High recall + low precision	Ranking	Right chunks found, ranked poorly
+High precision + low faithfulness	Generation	Model ignoring good context, prompt too weak
+High faithfulness + low relevancy	Generation	Over-refusing, or hedging instead of answering
+All four low	Corpus	The answers aren't in your documents
+'''
