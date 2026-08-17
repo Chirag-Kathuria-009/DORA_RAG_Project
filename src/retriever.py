@@ -55,7 +55,7 @@ def build_retriever() -> ContextualCompressionRetriever:
     )'''
     
     rerank_model = HuggingFaceCrossEncoder(
-        model_name="BAAI/bge-reranker-base"
+        model_name="BAAI/bge-reranker-large"
     )
     
     reranker = CrossEncoderReranker(
