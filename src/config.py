@@ -3,7 +3,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     cohere_api_key: str
     database_url: str 
-    embedding_model: int = 384
+    # must be identical in ingest and retrieval, or query vectors won't match the index
+    embedding_model_name: str = "BAAI/bge-small-en-v1.5"
     llm_model: str = "models/gemini-3.5-flash-lite"
     retrieval_top_k: int = 20
     rerank_top_n: int = 5

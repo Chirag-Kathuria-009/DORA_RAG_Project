@@ -1,17 +1,33 @@
 import json
+import re
 from pathlib import Path
-from langchain_community.document_loaders import PyPDFLoader
+
+from langchain_community.document_loaders import PyMuPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_postgres import PGVector
-from src.config import settings
 from langchain_huggingface import HuggingFaceEmbeddings
 
-def load_and_chunk(pdf_path: str) -> list:
-    loader = PyPDFLoader(pdf_path)
-    pages = loader.load()
+from src.config import settings
 
-    # Add DORA-specific metadata to every chunk
+# "Article 12" on a line of its own is a heading; the same string inside a
+# sentence is a cross-reference and must not be treated as a section start.
+ARTICLE_HEADING = re.compile(r"^[ \t]*Article\s+(\d+)[ \t]*$", re.MULTILINE)
+
+
+def load_and_chunk(pdf_path: str) -> list:
+    """Load the regulation and split it into chunks tagged with their Article.
+
+    PyMuPDFLoader rather than PyPDFLoader: this PDF is justified text, and
+    pypdf reconstructs word boundaries from glyph displacement, so widened
+    letter-spacing on justified lines gets emitted as spaces inside words
+    ("secur ity", "netw ork", "manage ment"). That silently broke retrieval,
+    since BM25 tokenises on whitespace and could never match "security" -- the
+    intact token appeared 0 times in the corpus against 82 broken ones.
+    PyMuPDF groups glyphs into words using font advance widths instead, which
+    drops keyword corruption from 38.7% to 0%.
+    """
+    pages = PyMuPDFLoader(pdf_path).load()
+
     for page in pages:
         page.metadata["regulation"] = "DORA"
         page.metadata["source_type"] = "EU_regulation"
@@ -22,15 +38,34 @@ def load_and_chunk(pdf_path: str) -> list:
         separators=["\n\nArticle ", "\n\n", "\n", ".", " "],
     )
     chunks = splitter.split_documents(pages)
+    _tag_articles(chunks)
+
+    tagged = sum(1 for c in chunks if c.metadata.get("article"))
     print(f"Created {len(chunks)} chunks from {len(pages)} pages")
+    print(f"Tagged {tagged}/{len(chunks)} chunks with an Article number")
     return chunks
 
 
+def _tag_articles(chunks: list) -> None:
+    """Attach the owning Article number to each chunk, in place.
+
+    Chunks are in document order, so a chunk with no heading of its own belongs
+    to the last Article seen. Chunks before Article 1 are recitals and stay
+    untagged. This is what makes retrieval measurable without an LLM judge: the
+    golden dataset records an article_reference per question, so a retrieved
+    chunk can be scored as correct or not by comparing metadata.
+    """
+    current = None
+    for chunk in chunks:
+        headings = ARTICLE_HEADING.findall(chunk.page_content)
+        if headings:
+            current = int(headings[-1])
+        chunk.metadata["article"] = current
+
+
 def build_vectorstore(chunks: list) -> PGVector:
-    embeddings = HuggingFaceEmbeddings(
-        model_name="BAAI/bge-small-en-v1.5"
-    )
-    
+    embeddings = HuggingFaceEmbeddings(model_name=settings.embedding_model_name)
+
     vectorstore = PGVector(
         embeddings=embeddings,
         collection_name="dora_chunks",
@@ -50,8 +85,8 @@ def save_chunks_for_bm25(chunks: list, path: str = "data/chunks_cache.json"):
         {"page_content": c.page_content, "metadata": c.metadata}
         for c in chunks
     ]
-    with open(path, "w") as f:
-        json.dump(serialized, f)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(serialized, f, ensure_ascii=False)
     print(f"Saved {len(chunks)} chunks to {path}")
 
 

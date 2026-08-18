@@ -30,7 +30,7 @@ def build_retriever() -> ContextualCompressionRetriever:
     bm25_retriever = BM25Retriever.from_documents(documents=chunks, k=settings.retrieval_top_k)
     
     embeddings = HuggingFaceEmbeddings(
-        model_name="BAAI/bge-small-en-v1.5"
+        model_name=settings.embedding_model_name
     )
     
     vectorstore = PGVector(
