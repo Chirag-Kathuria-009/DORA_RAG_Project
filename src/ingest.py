@@ -63,7 +63,17 @@ def _tag_articles(chunks: list) -> None:
         chunk.metadata["article"] = current
 
 
-def build_vectorstore(chunks: list) -> PGVector:
+def build_vectorstore(chunks: list, reset: bool = False) -> PGVector:
+    """Index chunks into pgvector, optionally replacing the collection first.
+
+    add_documents() appends with fresh UUIDs and no content dedup, while
+    save_chunks_for_bm25() overwrites its file. Re-running ingest without
+    reset therefore desynchronises the two halves of the hybrid retriever:
+    BM25 sees only the new chunks, pgvector sees old and new. The
+    EnsembleRetriever fuses those rankings assuming one shared corpus, so the
+    duplicates crowd out distinct results and the reranker can return the same
+    passage twice. Reset keeps both stores overwrite-only.
+    """
     embeddings = HuggingFaceEmbeddings(model_name=settings.embedding_model_name)
 
     vectorstore = PGVector(
@@ -72,6 +82,18 @@ def build_vectorstore(chunks: list) -> PGVector:
         connection=settings.database_url,
         use_jsonb=True,
     )
+
+    if reset:
+        vectorstore.delete_collection()
+        vectorstore.create_collection()
+        print("Dropped and recreated collection 'dora_chunks'")
+    else:
+        print(
+            "WARNING: appending to the existing collection. If it already holds "
+            "these chunks you will index duplicates and pgvector will fall out "
+            "of sync with the BM25 cache. Re-run with --reset to replace it."
+        )
+
     vectorstore.add_documents(chunks)
     print(f"Indexed {len(chunks)} chunks into pgvector")
     return vectorstore
@@ -91,6 +113,9 @@ def save_chunks_for_bm25(chunks: list, path: str = "data/chunks_cache.json"):
 
 
 if __name__ == "__main__":
+    import sys
+
+    reset = "--reset" in sys.argv
     chunks = load_and_chunk("data/raw/DORA_regulation_EU_2022_2554.pdf")
-    build_vectorstore(chunks)
+    build_vectorstore(chunks, reset=reset)
     save_chunks_for_bm25(chunks)
